@@ -1,0 +1,262 @@
+#!/bin/sh
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Copyright [2020] [krakenninja]
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#begin temporary to resolve apple annoying bug http://openradar.appspot.com/11894054
+unset LD_LIBRARY_PATH
+unset DYLD_LIBRARY_PATH
+#end temporary to resolve apple annoying bug http://openradar.appspot.com/11894054
+
+# ===== CONSTANTS =====
+KEYUTIL_DIR=$(dirname "$0")
+KEYSTORE_FILE=out.keystore
+CER_FILE=out.cer
+TRUSTSTORE_FILE=out.truststore
+
+# ===== FUNCTIONS/METHODS =====
+# get user inputs
+getUserInputs()
+{
+    # 1 :: ask for Common Name (default to `hostname`)
+    read -p $'\n\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
+    if [ "$COMMON_NAME" == "" ] ; then
+        COMMON_NAME=`hostname`
+    else
+        while [[ ! "$COMMON_NAME" =~ ^[^\\/?%*:|\"\<\>\.\@\$\!]+$ ]]
+        do
+            read -p $'\n\n[WARN]   "'$COMMON_NAME'" is invalid! Try again...'$'\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
+            if [ "$COMMON_NAME" == "" ] ; then
+                COMMON_NAME=`hostname`
+            fi
+        done
+    fi
+    # input failsafe, die
+    if [ "$COMMON_NAME" == "" ] ; then
+        echo '\n\n[ERROR]   Common Name is required!\n\n'
+        exit 1
+    fi
+    
+    # 2 :: ask for Work Path (default to script base directory)
+    read -p $'[INFO]   Specify Work Path (default: '$KEYUTIL_DIR') >>> ' WORK_PATH
+    if [ "$WORK_PATH" == "" ] ; then
+        WORK_PATH=$KEYUTIL_DIR
+    else
+        while [ ! -d "$WORK_PATH" ]
+        do
+            read -p $'\n\n[WARN]   "'$WORK_PATH'" not found! Try again...'$'\n[INFO]   Specify Work Path (default: '$KEYUTIL_DIR') >>> ' WORK_PATH
+            if [ "$WORK_PATH" == "" ] ; then
+                WORK_PATH=$KEYUTIL_DIR
+            fi
+        done
+    fi
+    # input failsafe, die
+    if [ ! -d "$WORK_PATH" ] ; then
+        echo '\n\n[ERROR]   Work Path is required!\n\n'
+        exit 1
+    fi
+    
+    # 3 :: ask for password (default to <empty string>)
+    read -s -p $'[INFO]   Specify Store Password >>> ' STORE_PASS
+    while [[ "$STORE_PASS" == "" || ${#STORE_PASS} < 6 ]]
+    do
+        read -s -p $'\n\n[WARN]   Store Password is invalid! Try again...'$'\n[INFO]   Specify Store Password >>> ' STORE_PASS
+    done
+    # input failsafe, die
+    if [[ "$STORE_PASS" == "" || ${#STORE_PASS} < 6 ]] ; then
+        echo '\n\n[ERROR]   Store Password is required!\n\n'
+        exit 1
+    fi
+    
+    # 4 :: ask for validity days (default to 365)
+    read -p $'\n[INFO]   Specify Validity Days (default: 365) >>> ' VALIDITY_DAYS
+    if [ "$VALIDITY_DAYS" == "" ] ; then
+        VALIDITY_DAYS="365"
+    else
+        while [[ ! "$VALIDITY_DAYS" =~ ^(0|[1-9][0-9]*)$ ]]
+        do
+            read -p $'\n\n[WARN]   "'$VALIDITY_DAYS'" is invalid! Try again...'$'\n[INFO]   Specify Validity Days (default: 365) >>> ' VALIDITY_DAYS
+            if [ "$VALIDITY_DAYS" == "" ] ; then
+                VALIDITY_DAYS="365"
+            fi
+        done
+    fi
+    # input failsafe, die
+    if [[ ! "$VALIDITY_DAYS" =~ ^(0|[1-9][0-9]*)$ ]] ; then
+        echo '\n\n[ERROR]   Validity Days is required!\n\n'
+        exit 1
+    fi
+    
+    # 5 :: ask for alias (default to $COMMON_NAME)
+    read -p $'[INFO]   Specify Alias (default: '$COMMON_NAME') >>> ' ALIAS
+    if [ "$ALIAS" == "" ] ; then
+        ALIAS="$COMMON_NAME"
+    fi
+    
+    # 6 :: ask for keysize (default to 2048)
+    read -p $'[INFO]   Specify Keysize (default: 2048) >>> ' KEYSIZE
+    if [ "$KEYSIZE" == "" ] ; then
+        KEYSIZE="2048"
+    else
+        while [[ ! "$KEYSIZE" =~ ^(0|[1-9][0-9]*)$ || $(($KEYSIZE%1024)) != 0 ]]
+        do
+            read -p $'\n\n[WARN]   "'$KEYSIZE'" is invalid! Try again...'$'\n[INFO]   Specify Keysize (default: 2048) >>> ' KEYSIZE
+            if [ "$KEYSIZE" == "" ] ; then
+                KEYSIZE="2048"
+            fi
+        done
+    fi
+    # input failsafe, die
+    if [[ ! "$KEYSIZE" =~ ^(0|[1-9][0-9]*)$ || $(($KEYSIZE%1024)) != 0 ]] ; then
+        echo '\n\n[ERROR]   Keysize is required!\n\n'
+        exit 1
+    fi
+    
+    # 7 :: ask for key algorithm (default to RSA)
+    read -p $'[INFO]   Specify Key Algorithm (default: RSA) >>> ' KEYALGO
+    if [ "$KEYALGO" == "" ] ; then
+        KEYALGO="RSA"
+    fi
+    
+    # 8 :: ask for signature algorithm (default to SHA256WithRSA)
+    read -p $'[INFO]   Specify Signature Algorithm (default: SHA256WithRSA) >>> ' SIGALGO
+    if [ "$SIGALGO" == "" ] ; then
+        SIGALGO="SHA256WithRSA"
+    fi
+    
+    # 9 :: ask for store type (default to pkcs12)
+    read -p $'[INFO]   Specify Store Type (default: pkcs12) >>> ' STORE_TYPE
+    if [ "$STORE_TYPE" == "" ] ; then
+        STORE_TYPE="pkcs12"
+    fi
+}
+
+# configure paths
+configurePaths()
+{
+    WORK_PATH="$WORK_PATH/$COMMON_NAME"
+    if [ -d $WORK_PATH ] ; then
+        echo '[INFO]   Using Work Path "'$WORK_PATH'"'
+    else
+        mkdir -p $WORK_PATH
+        if [ $? -ne 0 ] ; then 
+            echo '\n\n[ERROR]   Create Work Path "'$WORK_PATH'" failure! `mkdir` exit code ['$?'] expected [0]\n\n'
+            exit 1
+        else
+            echo '[INFO]   Work Path not found. Created and using Work Path "'$WORK_PATH'"'
+        fi
+    fi
+}
+
+# generate key store and trust store
+genKeyCerTrustStore()
+{
+    # contruct the self-signed DN
+    DN="CN=$COMMON_NAME, OU=$COMMON_NAME, O=Self-Signed, L=Localhost, S=Local Domain, C=Localhost"
+    
+    # generate keystore
+    KEYSTORE_PATH="$WORK_PATH/$KEYSTORE_FILE"
+    echo "[INFO]   Generating keystore..."
+    $KEYTOOL_PATH -genkey \
+        -keystore "$KEYSTORE_PATH" \
+        -storepass "$STORE_PASS" \
+        -keyalg "$KEYALGO" \
+        -sigalg "$SIGALGO" \
+        -keysize "$KEYSIZE" \
+        -storetype "$STORE_TYPE" \
+        -alias "$ALIAS" \
+        -validity "$VALIDITY_DAYS" \
+        -dname "$DN" \
+        -keypass "$STORE_PASS"
+    exitcode=$?
+    if [ $exitcode -ne 0 ] ; then 
+        echo '\n\n[ERROR]   Generate keystore failure! `keytool` exit code ['$exitcode'] expected [0]\n\n'
+        exit 1
+    else
+        echo '[INFO]   Generated keystore "'$KEYSTORE_PATH'"'
+        
+        # export out certificate
+        CER_PATH="$WORK_PATH/$CER_FILE"
+        echo "[INFO]   Exporting certificate from keystore..."
+        $KEYTOOL_PATH -export \
+            -file "$CER_PATH" \
+            -keystore "$KEYSTORE_PATH" \
+            -storepass "$STORE_PASS" \
+            -alias "$ALIAS"
+        exitcode=$?
+        if [ $exitcode -ne 0 ] ; then 
+            echo '\n\n[ERROR]   Export certificate failure! `keytool` exit code ['$exitcode'] expected [0]\n\n'
+            exit 1
+        else
+            echo '[INFO]   Exported certificate "'$CER_PATH'"'
+            
+            # import certificate to truststore
+            TRUSTSTORE_PATH="$WORK_PATH/$TRUSTSTORE_FILE"
+            echo "[INFO]   Generating truststore..."
+            $KEYTOOL_PATH -import \
+                -alias "$ALIAS" \
+                -file "$CER_PATH" \
+                -keystore "$TRUSTSTORE_PATH" \
+                -storepass "$STORE_PASS" \
+                -storetype "$STORE_TYPE" \
+                -noprompt
+            exitcode=$?
+            if [ $exitcode -ne 0 ] ; then 
+                echo '\n\n[ERROR]   Generate truststore failure! `keytool` exit code ['$exitcode'] expected [0]\n\n'
+                exit 1
+            else
+                echo '[INFO]   Generated truststore "'$TRUSTSTORE_PATH'"'
+            fi
+        fi
+    fi
+}
+
+# main()
+main()
+{
+    KEYTOOL_PATH=`which keytool`
+    if [[ "$JAVA_HOME" == "" && "$KEYTOOL_PATH" == "" ]] ; then 
+        echo '\n\n[ERROR]   Environment variable "$JAVA_HOME" required!\n\n'
+        exit 1
+    else
+        if [ ! -f "$KEYTOOL_PATH" ] ; then
+            if [ "$JAVA_HOME" == "" ] ; then
+                echo '\n\n[ERROR]   Environment variable "$JAVA_HOME" required!\n\n'
+                exit 1
+            else
+                if [ ! -d "$JAVA_HOME/bin" ] ; then
+                    echo '\n\n[ERROR]   Invalid Java Home "'$JAVA_HOME'"!\n\n'
+                    exit 1
+                else
+                    KEYTOOL_PATH="$JAVA_HOME/bin/keytool"
+                    if [ ! -f "$KEYTOOL_PATH" ] ; then
+                        echo '\n\n[ERROR]   Keytool not found in "'$JAVA_HOME'"!\n\n'
+                        exit 1
+                    fi
+                fi
+            fi
+        fi
+        
+        echo '[INFO]   Using keytool "'$KEYTOOL_PATH'"'
+        getUserInputs
+        configurePaths
+        genKeyCerTrustStore
+        exit 0
+    fi
+}
+
+# ===== CALL MAIN =====
+main
