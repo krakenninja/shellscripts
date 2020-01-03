@@ -31,26 +31,7 @@ TRUSTSTORE_FILE=out.truststore
 # get user inputs
 getUserInputs()
 {
-    # 1 :: ask for Common Name (default to `hostname`)
-    read -p $'\n\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
-    if [ "$COMMON_NAME" == "" ] ; then
-        COMMON_NAME=`hostname`
-    else
-        while [[ ! "$COMMON_NAME" =~ ^[^\\/?%*:|\"\<\>\.\@\$\!]+$ ]]
-        do
-            read -p $'\n\n[WARN]   "'$COMMON_NAME'" is invalid! Try again...'$'\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
-            if [ "$COMMON_NAME" == "" ] ; then
-                COMMON_NAME=`hostname`
-            fi
-        done
-    fi
-    # input failsafe, die
-    if [ "$COMMON_NAME" == "" ] ; then
-        echo '\n\n[ERROR]   Common Name is required!\n\n'
-        exit 1
-    fi
-    
-    # 2 :: ask for Work Path (default to script base directory)
+    # 1 :: ask for Work Path (default to script base directory)
     read -p $'[INFO]   Specify Work Path (default: '$KEYUTIL_DIR') >>> ' WORK_PATH
     if [ "$WORK_PATH" == "" ] ; then
         WORK_PATH=$KEYUTIL_DIR
@@ -66,6 +47,25 @@ getUserInputs()
     # input failsafe, die
     if [ ! -d "$WORK_PATH" ] ; then
         echo '\n\n[ERROR]   Work Path is required!\n\n'
+        exit 1
+    fi
+    
+    # 2 :: ask for Common Name (default to `hostname`)
+    read -p $'\n\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
+    if [ "$COMMON_NAME" == "" ] ; then
+        COMMON_NAME=`hostname`
+    else
+        while [[ ! "$COMMON_NAME" =~ ^[^\\/?%*:|\"\<\>\.\@\$\!]+$ ]]
+        do
+            read -p $'\n\n[WARN]   "'$COMMON_NAME'" is invalid! Try again...'$'\n[INFO]   Specify Common Name (default: '`hostname`') >>> ' COMMON_NAME
+            if [ "$COMMON_NAME" == "" ] ; then
+                COMMON_NAME=`hostname`
+            fi
+        done
+    fi
+    # input failsafe, die
+    if [ "$COMMON_NAME" == "" ] ; then
+        echo '\n\n[ERROR]   Common Name is required!\n\n'
         exit 1
     fi
     
